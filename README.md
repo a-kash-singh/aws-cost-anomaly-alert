@@ -40,6 +40,25 @@ Cost increase detected on 2026-08-30
 Cost Explorer is a global AWS service, so this works no matter which
 region you deploy the Lambda into.
 
+## Example alerts
+
+<img src="docs/example-alert-decrease.png" alt="Slack alert: cost decrease detected" width="700">
+
+<img src="docs/example-alert-increase.png" alt="Slack alert: cost increase detected" width="700">
+
+These are recreations of real alerts from a production deployment, with
+every dollar figure and account ID replaced by placeholder values before
+publishing.
+
+One detail to flag: the `for <account IDs>` line groups spend by linked
+account, which is useful in an AWS Organization with multiple accounts
+under one payer. The base `lambda_function.py` in this repo reports at the
+payer-account level and doesn't include that line — to reproduce it, add
+`{"Type": "DIMENSION", "Key": "LINKED_ACCOUNT"}` alongside `SERVICE` in the
+`GroupBy` list in `get_service_costs()`, and extend the role's Cost
+Explorer statement with `ce:GetDimensionValues` if you also want to
+resolve account IDs to account names.
+
 ## Project layout
 
 ```
