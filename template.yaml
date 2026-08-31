@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Scheduled Lambda that checks AWS Cost Explorer for day-over-day cost
+  anomalies and posts an alert to Slack. Includes the IAM role/policy the
+  function needs and an EventBridge schedule to trigger it.
+
+Parameters:
+  SlackWebhookUrl:
+    Type: String
+    NoEcho: true
+    Description: >
+      Slack incoming webhook URL to post alerts to. Create one at
+      https://api.slack.com/messaging/webhooks.
+  ScheduleExpression:
+    Type: String
+    Default: rate(1 day)
+    Description: EventBridge schedule expression for how often to run the check.
+  MinPctIncrease:
+    Type: Number
+    Default: 10
+    Description: Minimum percent increase for a service to be flagged.
+  MinAbsIncreaseUsd:
+    Type: Number
+    Default: 10
+    Description: Minimum absolute USD increase for a service to be flagged.
+  LookbackDays:
+    Type: Number
+    Default: 7
+    Description: Number of days of cost history to pull each run.
+
+Resources:
+  CostAnomalyFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # No explicit RoleName: an auto-generated name means CloudFormation
+      # only needs CAPABILITY_IAM, not CAPABILITY_NAMED_IAM, which keeps
+      # `sam deploy --guided`'s default "Allow SAM CLI IAM role creation"
+      # prompt sufficient — no extra --capabilities flag to remember.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        # Least-privilege Cost Explorer access: this function only ever
+        # calls ce:GetCostAndUsage. Cost Explorer does not support
+        # resource-level permissions, so Resource must be '*'. Add more
+        # ce:Get*/ce:List* actions here only if you extend the Lambda to
+        # call them (e.g. anomaly detection, forecasts, recommendations).
+        - PolicyName: CostExplorerReadOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowGetCostAndUsage
+                Effect: Allow
+                Action:
+                  - ce:GetCostAndUsage
+                Resource: '*'
+        - PolicyName: LambdaLogging
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: logs:CreateLogGroup
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}:*'
+
+  CostAnomalyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Ref AWS::StackName
+      Description: Daily AWS Cost Explorer anomaly check with Slack alerting.
+      CodeUri: src/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.13
+      Architectures:
+        - arm64
+      Timeout: 30
+      MemorySize: 128
+      Role: !GetAtt CostAnomalyFunctionRole.Arn
+      Environment:
+        Variables:
+          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
+          MIN_PCT_INCREASE: !Ref MinPctIncrease
+          MIN_ABS_INCREASE_USD: !Ref MinAbsIncreaseUsd
+          LOOKBACK_DAYS: !Ref LookbackDays
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ScheduleExpression
+            Name: !Sub '${AWS::StackName}-schedule'
+            Description: Triggers the cost anomaly check on a schedule.
+            Enabled: true
+
+Outputs:
+  FunctionName:
+    Description: Name of the deployed Lambda function.
+    Value: !Ref CostAnomalyFunction
+  FunctionArn:
+    Description: ARN of the deployed Lambda function.
+    Value: !GetAtt CostAnomalyFunction.Arn
+  RoleArn:
+    Description: ARN of the IAM role the function assumes.
+    Value: !GetAtt CostAnomalyFunctionRole.Arn

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Packaging artifacts
+package/
+build/
+*.zip
+
+# SAM
+.aws-sam/
+samconfig.toml
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
